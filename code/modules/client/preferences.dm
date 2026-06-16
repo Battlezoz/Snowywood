@@ -366,7 +366,7 @@ GLOBAL_LIST_EMPTY(chosen_names)
 
 	var/datum/advclass/preview_subclass
 
-	var/tgui_pref = TRUE
+	var/tgui_pref = FALSE // Emerald-Summit TGUI chargen port: opt-in until parity (was TRUE)
 
 	var/race_bonus
 
@@ -458,6 +458,13 @@ GLOBAL_LIST_EMPTY(chosen_names)
 	if(slot_randomized)
 		load_character(default_slot) // Reloads the character slot. Prevents random features from overwriting the slot if saved.
 		slot_randomized = FALSE
+	// TGUI users get the unified /datum/preferences_menu window (Emerald-Summit
+	// port). The classic HTML path below stays intact for tgui_pref=FALSE and is
+	// the fallback while the TGUI port is incomplete. Default is FALSE during the
+	// port so the half-built menu is opt-in.
+	if(tgui_pref)
+		open_preferences_menu(user)
+		return
 	var/list/dat = list("<center>")
 	if(tabchoice)
 		current_tab = tabchoice

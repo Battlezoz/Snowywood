@@ -4,6 +4,8 @@ GLOBAL_LIST_INIT(roleplay_readme, world.file2list("strings/rt/rp_prompt.txt"))
 /mob/dead/new_player
 	var/ready = 0
 	var/spawning = 0//Referenced when you want to delete the new_player later on in the code.
+	/// TGUI late-join job picker (Emerald-Summit port)
+	var/datum/late_join_choices/late_join_choices
 	var/topjob = "Hero!"
 	flags_1 = NONE
 
@@ -805,6 +807,13 @@ GLOBAL_LIST_INIT(roleplay_readme, world.file2list("strings/rt/rp_prompt.txt"))
 	src << browse(null, "window=latechoices") //closes late job selection
 	src << browse(null, "window=migration") // Closes migrant menu
 	src << browse(null, "window=familiar_prefs") // Closes familiar prefs menu
+
+	// TGUI character setup + late-join pickers (Emerald-Summit port): close
+	// synchronously before the new_player mob is replaced so they don't linger.
+	if(client?.prefs?.preferences_menu)
+		SStgui.close_uis(client.prefs.preferences_menu)
+	if(late_join_choices)
+		SStgui.close_uis(late_join_choices)
 
 	SStriumphs.remove_triumph_buy_menu(client)
 
