@@ -237,4 +237,49 @@
 	log_ooc("DISCORD: [sender]: [message]")
 	return "OK"
 
+/// In-game replies from the RAG bot ("Quill") to OOC mentions of it. The bot
+/// (bot.py _answer_ooc_quill) detects "quill" in mirrored OOC, runs the RAG, and
+/// calls this back. Comms-key gated; broadcasts as an OOC line under the same
+/// visibility + mute rules as the discord_ooc bridge above.
+/datum/world_topic/quill_say
+	keyword = "quill_say"
+	require_comms_key = TRUE
+	/// world.time of recent Quill lines, for rate limiting
+	var/static/list/recent_times = list()
+
+/datum/world_topic/quill_say/Run(list/input)
+	if(!GLOB.ooc_allowed)
+		return "OOC disabled"
+	var/now = world.time
+	var/list/kept = list()
+	for(var/t in recent_times)
+		if(now - t <= 5 SECONDS)
+			kept += t
+	recent_times = kept
+	if(length(recent_times) >= 3)
+		return "Rate limited"
+	recent_times += now
+
+	var/message = input["message"]
+	if(!message)
+		return "No message"
+	message = copytext(sanitize(message), 1, MAX_MESSAGE_LEN)
+	if(!message)
+		return "Empty message"
+
+	var/msg_to_send = "<font color='#1f9ec9'><EM>Quill:</EM></font> <font color='#1f9ec9'><span class='message linkify'>[message]</span></font>"
+	var/post_round = (SSticker.current_state >= GAME_STATE_FINISHED)
+	for(var/client/C in GLOB.clients)
+		if(!post_round)
+			if(!C.holder && !istype(C.mob, /mob/dead/new_player))
+				continue
+			if(C.holder && !C.show_lobby_ooc && !istype(C.mob, /mob/dead/new_player))
+				continue
+		if(!(C.prefs.chat_toggles & CHAT_OOC))
+			continue
+		to_chat(C, type = MESSAGE_TYPE_OOC, html = msg_to_send)
+
+	log_ooc("QUILL: [message]")
+	return "OK"
+
 	

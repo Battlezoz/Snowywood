@@ -34,6 +34,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("snowybot")
 
+# In-game Quill: an OOC line mentioning this word gets a RAG answer broadcast
+# back in-game via the quill_say world topic (see _on_ooc / _answer_ooc_quill).
+QUILL_OOC_TRIGGER = re.compile(r"\bquill\b", re.IGNORECASE)
+QUILL_OOC_COOLDOWN = 8.0  # min seconds between in-game Quill OOC answers (anti-spam)
+
 
 class ConvoStore:
     """Persistent /ask exchange log keyed by the bot's answer message ID, so
@@ -105,6 +110,7 @@ class SnowyBot(commands.Bot):
         self._ask_waiting = 0                       # requests queued behind the lock
         self._discord_docs_indexed = False          # channel directory indexed once
         self.convo = ConvoStore(config.CONVO_DB)    # reply-chain follow-up memory
+        self._last_quill_ooc = 0.0                  # monotonic ts of last in-game Quill OOC answer
 
     async def setup_hook(self) -> None:
         await self._start_ingest_server()
@@ -241,12 +247,37 @@ class SnowyBot(commands.Bot):
         await channel.send(embed=embed)
 
     async def _on_ooc(self, payload: dict) -> None:
-        channel = self.get_channel(config.OOC_CHANNEL_ID)
-        if not isinstance(channel, discord.abc.Messageable):
-            return
-        sender = discord.utils.escape_markdown(str(payload.get("sender", "?")))
         message = str(payload.get("message", ""))
-        await channel.send(f"**{sender}:** {message}", allowed_mentions=discord.AllowedMentions.none())
+        channel = self.get_channel(config.OOC_CHANNEL_ID)
+        if isinstance(channel, discord.abc.Messageable):
+            sender = discord.utils.escape_markdown(str(payload.get("sender", "?")))
+            await channel.send(f"**{sender}:** {message}", allowed_mentions=discord.AllowedMentions.none())
+        # In-game Quill: an OOC mention of "quill" gets a RAG answer spoken back
+        # in-game. Fire-and-forget so the game's /ingest POST returns immediately
+        # (RAG inference takes a few seconds).
+        if self.rag.ok and QUILL_OOC_TRIGGER.search(message):
+            asyncio.create_task(self._answer_ooc_quill(message))
+
+    async def _answer_ooc_quill(self, message: str) -> None:
+        """Answer an in-game OOC mention of 'quill' via the RAG and broadcast the
+        reply back in-game through the quill_say world topic."""
+        now = time.monotonic()
+        if now - self._last_quill_ooc < QUILL_OOC_COOLDOWN:
+            return
+        # Strip the trigger word to isolate the actual question.
+        question = QUILL_OOC_TRIGGER.sub(" ", message).strip(" ,.:;?!").strip()
+        if len(question) < 3:
+            return
+        self._last_quill_ooc = now  # set before awaiting (anti-spam) — single-threaded, no race
+        try:
+            async with self._ask_lock:  # serialize with Discord /ask — one inference at a time
+                answer, _sources = await self.rag.answer(question)
+            if not answer:
+                return
+            answer = " ".join(answer.split())[:350]  # collapse whitespace + cap for the world topic
+            await self.game_query("quill_say", message=answer)
+        except Exception:
+            log.exception("Failed answering in-game Quill OOC mention")
 
     async def _on_ahelp(self, payload: dict) -> None:
         channel = self.get_channel(config.AHELP_CHANNEL_ID)

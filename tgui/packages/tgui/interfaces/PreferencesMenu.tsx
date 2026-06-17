@@ -380,7 +380,9 @@ export const PreferencesMenu = (props) => {
   // The title-bar close (X) button is always available — the window must never be
   // un-closeable. Latejoiners who close it mid-round are caught by the server-side
   // force-reopen (preferences_menu.dm ui_close), so they can't strand themselves.
-  const canClose = true;
+  // No close (X) button — chargen closes programmatically on spawn/ready, and
+  // the classic HTML menu (preferencess_window) is also can-close=false.
+  const canClose = false;
 
   return (
     <Window width={1600} height={820} canClose={canClose}>

@@ -459,7 +459,14 @@ GLOBAL_LIST_EMPTY(chosen_names)
 /datum/preferences/proc/close_legacy_chargen(mob/user)
 	if(!user)
 		return
-	for(var/win in list("preferences_browser", "mob_occupation", "character_custom", "loadout_select", "keybind_setup", "antag_setup", "capturekeypress", "origin_map"))
+	// The classic chargen is the skin window "preferencess_window" — it holds
+	// BOTH the HTML browser element AND the character_preview_map. Emptying just
+	// the browser leaves the window + preview map on-screen (blank window + grey
+	// square), so hide the whole window and clear the leftover preview objects.
+	winshow(user, "preferencess_window", FALSE)
+	user.client?.clear_character_previews()
+	// The remaining classic panels are separate /datum/browser popups.
+	for(var/win in list("mob_occupation", "character_custom", "loadout_select", "keybind_setup", "antag_setup", "capturekeypress", "origin_map"))
 		user << browse(null, "window=[win]")
 
 /datum/preferences/proc/ShowChoices(mob/user, tabchoice)
