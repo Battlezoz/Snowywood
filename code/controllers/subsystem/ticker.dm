@@ -183,6 +183,9 @@ SUBSYSTEM_DEF(ticker)
 				window_flash(C, ignorepref = TRUE) //let them know lobby has opened up.
 //			to_chat(world, span_boldnotice("Welcome to [station_name()]!"))
 			send2chat(new /datum/tgs_message_content("New round starting on [SSmapping.config.map_name]!"), CONFIG_GET(string/chat_announce_new_game))
+			// Round-start announcement goes through the Discord bot sidecar only;
+			// the legacy DISCORD_WEBHOOK_URL path ("Round Bot") was removed to stop duplicates.
+			send_bot_event("round", list("event" = "start", "map" = "[SSmapping.config.map_name]"))
 
 			current_state = GAME_STATE_PREGAME
 			//Everyone who wants to be an observer is now spawned

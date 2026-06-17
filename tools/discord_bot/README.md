@@ -5,10 +5,12 @@ old one-way `DISCORD_WEBHOOK_URL` notification with a real bot.
 
 ## What it does
 
-- **Round notifications** — round start / ending / ended posted as embeds in an announce channel.
+- **Round notifications** — round ending / ended posted as embeds in an announce channel.
 - **Server status** — `/status` and `/players` slash commands, plus live bot presence ("N players | Mm").
 - **OOC bridge** — messages in a chosen Discord channel appear in game OOC, and in-game OOC is mirrored back.
 - **Ahelp relay** — each ticket opens a Discord thread in a staff channel; staff replies in the thread are PM'd to the player in game.
+- **`/ask` game Q&A** — a fully local RAG pipeline answers player questions about jobs, gods,
+  classes, skills, spells, virtues, smithing recipes, and lore. See "RAG /ask" below.
 
 ## How it talks to the game
 
@@ -51,6 +53,45 @@ The game side is already wired up:
    auto-starts on reboot like the game and database containers. Logs: `docker logs -f snowywood-discord-bot`.
 
 6. **Apply the game side** — the new config/topic handlers take effect after the next compile + round restart.
+
+## RAG /ask
+
+Fully local question answering — no API keys, ~1.1 GB RAM total, strictly grounded in
+game data extracted from this codebase.
+
+```
+rag_extract.py   .dm sources + books  ->  data/corpus.jsonl     (no deps, run on host)
+rag_ingest.py    corpus + embed server -> data/rag.sqlite       (no deps, run on host)
+rag.py           runtime: retrieve top-k chunks -> tiny LLM answers ONLY from them
+```
+
+Two llama.cpp sidecars live in `/home/blob/docker-compose.yml`:
+
+- `snowywood-llm` (port 8089): Qwen3-0.6B Q4_K_M, ~600 MB. Generation, temperature 0.
+  Set `LLM_MODEL` in the compose environment to swap in a bigger gguf from `/home/blob/models`.
+- `snowywood-embed` (port 8090): nomic-embed-text v1.5 Q8, ~200 MB. Embeddings.
+
+Guardrails: the system prompt forbids answering outside the retrieved entries, retrieval
+below a similarity floor (`RAG_MIN_SCORE`) short-circuits to "I don't know" without calling
+the model, answers cite their source entries in the embed footer, and a per-user cooldown
+(`ASK_COOLDOWN`) plus a global one-at-a-time lock keep CPU inference from stacking up.
+
+Both models run with `--mlock` (pinned in RAM, no cold-start paging) and auto-start with
+the docker daemon on boot. `/ask` also receives a **live server status** entry on every
+question — current player list (via the comms-key-gated `playerlist` world topic, which
+respects the anonymize list), map, round ID, round duration, and staff count — so it can
+answer "is X playing right now?" or "what map is on?" alongside knowledge-base questions.
+
+To refresh the knowledge base after game content changes:
+
+```bash
+cd tools/discord_bot
+python3 rag_extract.py          # rebuild corpus from the codebase
+python3 rag_ingest.py           # re-embed (needs the embed container up)
+./run.sh                        # restart the bot to reload the index
+```
+
+The same `data/corpus.jsonl` is the planned input for generating wiki pages.
 
 ## Notes
 

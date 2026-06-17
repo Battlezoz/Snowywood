@@ -36,3 +36,16 @@ INGEST_SECRET = _req("BOT_INGEST_SECRET")        # must match DISCORD_BOT_SECRET
 
 # --- Behaviour ---
 PRESENCE_INTERVAL = _int("PRESENCE_INTERVAL", 60)  # seconds between status polls for bot presence
+
+# --- RAG /ask command (local llama.cpp sidecars; see rag.py) ---
+RAG_DB = os.getenv("RAG_DB", "/app/data/rag.sqlite").strip()
+CONVO_DB = os.getenv("CONVO_DB", "/app/data/convo.sqlite").strip()  # reply-chain memory
+LLM_URL = os.getenv("LLM_URL", "http://127.0.0.1:8089").strip()
+EMBED_URL = os.getenv("EMBED_URL", "http://127.0.0.1:8090").strip()
+RAG_TOP_K = _int("RAG_TOP_K", 5)
+RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.45").strip() or 0.45)
+ASK_COOLDOWN = _int("ASK_COOLDOWN", 15)  # per-user seconds between /ask uses
+ASK_MAX_QUEUE = _int("ASK_MAX_QUEUE", 3)  # questions allowed to wait behind a running answer
+# Include connected player names in /ask live answers ("is X playing?").
+# Set false to expose only the player count (reduces who-is-online metagaming).
+ASK_PLAYER_NAMES = os.getenv("ASK_PLAYER_NAMES", "true").strip().lower() != "false"

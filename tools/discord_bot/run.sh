@@ -16,6 +16,7 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   --env-file .env \
+  -v "$(pwd)/data:/app/data" \
   snowywood-discord-bot
 
 echo "Bot started. Logs: docker logs -f snowywood-discord-bot"

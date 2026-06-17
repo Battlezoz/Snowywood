@@ -175,6 +175,20 @@
 	.["extreme_popcap"] = CONFIG_GET(number/extreme_popcap) || 0
 	.["popcap"] = max(CONFIG_GET(number/soft_popcap), CONFIG_GET(number/hard_popcap), CONFIG_GET(number/extreme_popcap)) //generalized field for this concept for use across ss13 codebases
 
+/// Connected player keys for the Discord bot's /ask live-status answers. Comms-key gated.
+/datum/world_topic/playerlist
+	keyword = "playerlist"
+	require_comms_key = TRUE
+
+/datum/world_topic/playerlist/Run(list/input)
+	var/list/keys = list()
+	for(var/client/C in GLOB.clients)
+		var/key = C.ckey
+		if(key in GLOB.anonymize)
+			key = get_fake_key(key)
+		keys += key
+	return jointext(keys, ", ")
+
 /// Inbound OOC from the Discord bot bridge. Comms-key gated; broadcasts using the same OOC visibility rules as /client/verb/ooc.
 /datum/world_topic/discord_ooc
 	keyword = "discord_ooc"
