@@ -179,3 +179,31 @@
       harvest cycle's time.
   - rscadd: Added the massage ability as a T0 miracle to eorans.
   - rscadd: 'Ports flower bed miracle from AP: https://github.com/Azure-Peak/Azure-Peak/pull/7003'
+2026-06-12:
+  AllCorruptingWyrm:
+  - rscadd: fixes a minor spelling mistake
+  Lokaka21:
+  - rscadd: A new female voicepack oriented towards gruff or more warriorlike feminine
+      types.
+  Makximus:
+  - rscdel: The Hand's fit changing on the rockhill map
+  - balance: Spymaster's stats
+  - rscadd: Sleuth to Spymaster
+  Ratwood Lore Team:
+  - rscdel: Removed Valley Accent
+  WolfOrion:
+  - balance: gives gnolls large balls
+  Xander3359:
+  - balance: Noble virtue now costs 7 triumphs
+  ophaq:
+  - bugfix: Fixes eora trees not producing golden fruits at max happiness.
+  - qol: Allows the bauernwehr on snip intent to prune the trees too!
+  zeroisthebiggay:
+  - rscadd: adds things to the universal accent
+  - rscadd: '"zaping" -> "ravaging"'
+  - rscadd: '"bestie" -> "friend"'
+  - rscadd: '"besties" -> "friends"'
+  - rscadd: '"totes" -> "totally"'
+  - rscadd: '"delish" -> "delicious"'
+  - rscadd: '"gyaru" -> "delinquent"'
+  - rscadd: '"gyarus" -> "delinquents"'
