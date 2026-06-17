@@ -422,11 +422,11 @@ GLOBAL_LIST_EMPTY(chosen_names)
 	hud_colorblind_palette = new_palette
 	return TRUE
 
-/datum/preferences/proc/set_new_race(datum/species/new_race, user)
+/datum/preferences/proc/set_new_race(datum/species/new_race, user, silent = FALSE)
 	pref_species = new_race
 	real_name = pref_species.random_name(gender,1)
 	ResetJobs()
-	if(user)
+	if(user && !silent)
 		if(pref_species.desc)
 			to_chat(user, "[pref_species.desc]")
 		if(pref_species.expanded_desc)
@@ -452,6 +452,16 @@ GLOBAL_LIST_EMPTY(chosen_names)
 #define APPEARANCE_CATEGORY_COLUMN "<td valign='top' width='14%'>"
 #define MAX_MUTANT_ROWS 4
 
+/// Closes every classic HTML chargen window so the TGUI menu and the legacy
+/// menu are never shown at the same time. Window ids mirror the /datum/browser
+/// popups opened by ShowChoices (preferences_browser) and its sub-panels
+/// (class selection, vices/appearance, loadout, keybinds, antag).
+/datum/preferences/proc/close_legacy_chargen(mob/user)
+	if(!user)
+		return
+	for(var/win in list("preferences_browser", "mob_occupation", "character_custom", "loadout_select", "keybind_setup", "antag_setup", "capturekeypress", "origin_map"))
+		user << browse(null, "window=[win]")
+
 /datum/preferences/proc/ShowChoices(mob/user, tabchoice)
 	if(!user || !user.client)
 		return
@@ -465,6 +475,10 @@ GLOBAL_LIST_EMPTY(chosen_names)
 	if(tgui_pref)
 		open_preferences_menu(user)
 		return
+	// Mutual exclusion: opening the classic HTML chargen closes the TGUI menu so
+	// both are never shown at once.
+	if(preferences_menu)
+		SStgui.close_uis(preferences_menu)
 	var/list/dat = list("<center>")
 	if(tabchoice)
 		current_tab = tabchoice

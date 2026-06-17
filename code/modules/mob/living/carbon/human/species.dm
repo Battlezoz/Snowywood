@@ -254,12 +254,30 @@ GLOBAL_LIST_EMPTY(roundstart_races)
 		for(var/body_marking_type in bodyset.body_marking_list)
 			body_markings |= body_marking_type
 
+/// Subspecies grouping for the TGUI chargen species picker (Emerald-Summit port):
+/// base_name buckets races into families in the top-level dropdown, sub_name is
+/// the variant label, is_subrace hides a variant from the top level. Standalone
+/// races fall back to `name` for both (set in New() below).
+/datum/species
+	var/base_name
+	var/sub_name
+	var/is_subrace = FALSE
+	/// Psydonic = a "Son of Psydon" lineage (royal-noble-eligible), shown as the
+	/// ᛉ rune in the chargen race picker; FALSE = inhumen (ᛣ). Chargen-display
+	/// classification only — SW has no runtime race class (inhumen anatomy is
+	/// curse/flaw-applied via TRAIT_INHUMEN_ANATOMY, not species-inherent).
+	var/psydonic = FALSE
+
 /datum/species/New()
 	add_marking_sets_to_markings()
 	if(!limbs_id)	//if we havent set a limbs id to use, just use our own id
 		limbs_id = name
 	if(!clothes_id)
 		clothes_id = id
+	if(!base_name)	//standalone races group under their own name
+		base_name = name
+	if(!sub_name)
+		sub_name = name
 	..()
 
 /datum/species/proc/after_creation(mob/living/carbon/human/H)

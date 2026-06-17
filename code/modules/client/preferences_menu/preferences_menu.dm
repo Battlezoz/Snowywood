@@ -91,6 +91,10 @@ GLOBAL_LIST_INIT(prefs_menu_wanderer_titles, list("Adventurer", "Wretch", "Court
 /datum/preferences_menu/ui_state(mob/user)
 	return GLOB.always_state
 
+/datum/preferences_menu/ui_assets(mob/user)
+	// Loadout item icon spritesheet — drives the per-slot item previews in LoadoutTab.
+	return list(get_asset_datum(/datum/asset/spritesheet/loadout_items))
+
 /// Every open preferences_menu registers here so notify_preference_menus_lobby_changed()
 /// can fan-out slim {lobby, header} pushes on actual events (ready toggles, round
 /// transitions). Replaces the prior per-menu 2s addtimer chain, which under load
@@ -371,15 +375,32 @@ GLOBAL_LIST_EMPTY(open_preference_menus)
 	id["selected_title"] = prefs.selected_title || "None"
 	id["has_subspecies_options"] = count_other_subspecies(prefs.pref_species) > 0
 
-	id["origin_name"] = prefs.virtue_origin ? "[prefs.virtue_origin]" : "None"
-	id["origin_gives_language"] = prefs.virtue_origin?.extra_language
+	id["origin_name"] = prefs.origin ? prefs.origin.name : "None"
+	// SW grants a free language pick only when the origin doesn't fix one (see
+	// preferences.dm copy_to: origin_language wins, else extra_language applies).
+	id["origin_gives_language"] = !prefs.origin?.origin_language
 
 	id["statpack_name"] = prefs.statpack?.name
 	id["statpack_label"] = prefs.statpack ? statpack_dropdown_label(prefs.statpack) : null
 	id["virtue_name"] = prefs.virtue ? "[prefs.virtue]" : "None"
 	id["virtuetwo_name"] = prefs.virtuetwo ? "[prefs.virtuetwo]" : "None"
 	id["show_virtuetwo"] = (prefs.statpack?.name == "Virtuous")
-	id["charflaw_name"] = prefs.charflaw ? "[prefs.charflaw]" : "None"
+	// Multi-vice (vice1..vice5). Lazily migrate a legacy single charflaw (old
+	// saves) into slot 1 so it surfaces in the new per-slot UI.
+	if(!prefs.vice1 && prefs.charflaw)
+		prefs.vice1 = prefs.charflaw
+	var/list/vice_names = list()
+	for(var/i in 1 to 5)
+		vice_names += vice_display_name(prefs.vars["vice[i]"])
+	id["vice_names"] = vice_names
+	id["vice_points"] = prefs.get_vice_points()
+
+	// Character presets (3 slots) + undo availability.
+	var/list/preset_summaries = list()
+	for(var/i in 1 to 3)
+		preset_summaries += prefs.get_preset_summary(i)
+	id["preset_summaries"] = preset_summaries
+	id["can_undo"] = length(prefs.customization_history) > 0
 
 	var/datum/faith/faith = GLOB.faithlist[prefs.selected_patron?.associated_faith]
 	id["faith_name"] = faith?.name
@@ -402,15 +423,28 @@ GLOBAL_LIST_EMPTY(open_preference_menus)
 	id["gender"] = prefs.gender
 	id["agender_species"] = (AGENDER in prefs.pref_species?.species_traits)
 
-	// Extra language — display "None" when origin doesn't grant the slot,
-	// even if a stale value is stored (preserved in case origin swaps back).
-	if(!prefs.virtue_origin?.extra_language)
-		id["extra_language_name"] = "None"
+	// Language: an origin with a fixed origin_language grants that (no pick);
+	// otherwise the player's free pick (extra_language) applies.
+	if(prefs.origin?.origin_language)
+		var/datum/language/OL = prefs.origin.origin_language
+		id["extra_language_name"] = initial(OL.name)
 	else if(ispath(prefs.extra_language, /datum/language))
 		var/datum/language/L = prefs.extra_language
 		id["extra_language_name"] = initial(L.name)
 	else
 		id["extra_language_name"] = "None"
+
+	// Two PAID language slots (extra_language_1 = 2 TRI, extra_language_2 = 4 TRI),
+	// drawn from the live triumph pool. Check-only at chargen (no deduction here).
+	id["paid_language_1"] = paid_language_name(prefs.extra_language_1)
+	id["paid_language_2"] = paid_language_name(prefs.extra_language_2)
+	id["triumphs"] = user.get_triumphs()
+	var/paid_spent = 0
+	if(prefs.extra_language_1 && prefs.extra_language_1 != "None")
+		paid_spent += 2
+	if(prefs.extra_language_2 && prefs.extra_language_2 != "None")
+		paid_spent += 4
+	id["paid_language_spent"] = paid_spent
 
 	// Tail (only when LAMIAN_TAIL species trait)
 	id["has_lamian_tail"] = (LAMIAN_TAIL in prefs.pref_species?.species_traits)
@@ -436,6 +470,7 @@ GLOBAL_LIST_EMPTY(open_preference_menus)
 	id["race_title_options"] = build_race_title_options()
 	id["statpack_options"] = build_statpack_options()
 	id["extra_language_options"] = build_extra_language_options()
+	id["paid_language_options"] = build_paid_language_options()
 	id["virtue_options"] = build_virtue_options(user)
 	id["charflaw_options"] = build_charflaw_options()
 	id["faith_options"] = build_faith_options()
@@ -480,20 +515,29 @@ GLOBAL_LIST_EMPTY(open_preference_menus)
 		cached_options = sortList(names)
 	return cached_options
 
+/// Maps a charflaw instance back to its GLOB.character_flaws display key so the
+/// per-slot dropdowns show the exact catalog label (keys carry "(+1 TRI)" etc.
+/// suffixes the datum name lacks). Reverse map cached once.
+/datum/preferences_menu/proc/vice_display_name(datum/charflaw/v)
+	if(!v)
+		return "None"
+	var/static/list/type_to_key
+	if(!type_to_key)
+		type_to_key = list()
+		for(var/key in GLOB.character_flaws)
+			type_to_key[GLOB.character_flaws[key]] = key
+	return type_to_key[v.type] || v.name
+
 /datum/preferences_menu/proc/build_faith_options()
 	var/list/names = list()
-	if(prefs.virtue_origin?.uniquefaith)
-		for(var/path as anything in prefs.virtue_origin.uniquefaith)
-			var/datum/faith/faith = GLOB.faithlist[path]
-			if(!faith?.name)
-				continue
-			names += faith.name
-	else
-		for(var/path as anything in GLOB.preference_faiths)
-			var/datum/faith/faith = GLOB.faithlist[path]
-			if(!faith?.name)
-				continue
-			names += faith.name
+	// Snowywood has no virtue_origin/uniquefaith model (ES-only; see
+	// _port_shims.dm). Always offer the full preference-faith roster. Phase 4
+	// (origin bridge) re-adds any SW-native faith restriction via /datum/origin.
+	for(var/path as anything in GLOB.preference_faiths)
+		var/datum/faith/faith = GLOB.faithlist[path]
+		if(!faith?.name)
+			continue
+		names += faith.name
 	return sortList(names)
 
 /datum/preferences_menu/proc/build_patron_options()
@@ -504,6 +548,8 @@ GLOBAL_LIST_EMPTY(open_preference_menus)
 	for(var/path as anything in GLOB.patrons_by_faith[faith_key])
 		var/datum/patron/patron = GLOB.patronlist[path]
 		if(!patron?.name)
+			continue
+		if(patron.disabled_patron)
 			continue
 		names += patron.name
 	return sortList(names)
@@ -552,19 +598,13 @@ GLOBAL_LIST_EMPTY(open_preference_menus)
 
 /datum/preferences_menu/proc/build_origin_options()
 	var/list/names = list()
-	for(var/path as anything in GLOB.virtues)
-		var/datum/virtue/V = GLOB.virtues[path]
-		if(!V?.name)
+	for(var/path as anything in GLOB.origins)
+		var/datum/origin/O = GLOB.origins[path]
+		if(!O?.name)
 			continue
-		if(prefs.virtue_origin && V.name == prefs.virtue_origin.name)
+		if(prefs.origin && O.name == prefs.origin.name)
 			continue
-		if(!istype(V, /datum/virtue/origin))
-			continue
-		if(V.restricted && (prefs.pref_species?.type in V.races))
-			continue
-		if(istype(V, /datum/virtue/origin/racial) && !(prefs.pref_species?.type in V.races))
-			continue
-		names += V.name
+		names += O.name
 	return names
 
 /datum/preferences_menu/proc/build_race_title_options()
@@ -633,7 +673,7 @@ GLOBAL_LIST_EMPTY(open_preference_menus)
 
 /datum/preferences_menu/proc/build_extra_language_options()
 	var/list/names = list()
-	if(!prefs.virtue_origin?.extra_language)
+	if(prefs.origin?.origin_language)	// origin fixes the language; no free pick
 		return names
 	var/static/list/selectable_languages = list(
 		/datum/language/grenzelhoftian,
@@ -650,6 +690,46 @@ GLOBAL_LIST_EMPTY(open_preference_menus)
 			continue
 		var/datum/language/a_language = new language()
 		names += a_language.name
+	return names
+
+/// The 16-language roster the two PAID triumph slots draw from (distinct from
+/// the smaller free-origin-language list above). Static — fixed at compile time.
+/datum/preferences_menu/proc/paid_language_roster()
+	var/static/list/roster = list(
+		/datum/language/elvish,
+		/datum/language/dwarvish,
+		/datum/language/orcish,
+		/datum/language/hellspeak,
+		/datum/language/draconic,
+		/datum/language/celestial,
+		/datum/language/canilunzt,
+		/datum/language/grenzelhoftian,
+		/datum/language/kazengunese,
+		/datum/language/etruscan,
+		/datum/language/gronnic,
+		/datum/language/otavan,
+		/datum/language/aavnic,
+		/datum/language/merar,
+		/datum/language/thievescant/signlanguage,
+		/datum/language/abyssal,
+	)
+	return roster
+
+/// Display name for a stored paid-language value (either "None" or a typepath).
+/datum/preferences_menu/proc/paid_language_name(stored)
+	if(!stored || stored == "None")
+		return "None"
+	var/datum/language/L = stored
+	return initial(L.name)
+
+/// Paid-slot option names: the roster minus anything the species already grants.
+/datum/preferences_menu/proc/build_paid_language_options()
+	var/list/names = list("None")
+	for(var/language in paid_language_roster())
+		if(language in prefs.pref_species?.languages)
+			continue
+		var/datum/language/L = language
+		names += initial(L.name)
 	return names
 
 /// DYNAMIC half of the body section. Current selections + boolean trait flags
@@ -1185,13 +1265,13 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 	data["flavortext_len"] = length(prefs.flavortext)
 	data["ooc_notes_len"] = length(prefs.ooc_notes)
 	data["rumour_len"] = length(prefs.rumour)
-	data["gossip_len"] = length(prefs.gossip)
+	data["gossip_len"] = length(prefs.noble_gossip)
 	data["ooc_extra_set"] = !!prefs.ooc_extra
 	data["headshot_link"] = prefs.headshot_link
 	data["nsfw_headshot_link"] = prefs.nsfw_headshot_link
 	data["nsfwflavortext_len"] = length(prefs.nsfwflavortext)
 	data["erpprefs_len"] = length(prefs.erpprefs)
-	data["nsfw_ooc_extra_set"] = !!prefs.nsfw_ooc_extra
+	data["nsfw_ooc_extra_set"] = !!prefs.nsfw_ooc_extra_img
 	data["song_url_set"] = !!prefs.song_url
 	data["song_title"] = prefs.song_title
 	data["song_artist"] = prefs.song_artist
@@ -1301,15 +1381,17 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			entry["state_text"] = "Disallowed by Virtue: [disallowed_name]"
 			return entry
 
-		if(prefs.virtue_origin?.type in job.virtue_restrictions)
-			entry["state"] = "origin"
-			entry["state_text"] = "Disallowed by Origin: [prefs.virtue_origin.name]"
-			return entry
+		// (origin no longer gates jobs in SW — the ES origin-as-virtue check
+		// was removed; SW gates by prefs.virtue/virtuetwo above.)
 
-	if(length(job.vice_restrictions) && (prefs.charflaw?.type in job.vice_restrictions))
-		entry["state"] = "vice"
-		entry["state_text"] = "Disallowed by Vice: [prefs.charflaw.name]"
-		return entry
+	// Check all vice slots (vice1..5) + legacy charflaw, mirroring the canonical
+	// spawn gate SSjob.has_restricted_vice — not just slot 1.
+	if(length(job.vice_restrictions))
+		for(var/datum/charflaw/restricted_vice in list(prefs.vice1, prefs.vice2, prefs.vice3, prefs.vice4, prefs.vice5, prefs.charflaw))
+			if(restricted_vice?.type in job.vice_restrictions)
+				entry["state"] = "vice"
+				entry["state_text"] = "Disallowed by Vice: [restricted_vice.name]"
+				return entry
 
 	var/job_unavailable = JOB_AVAILABLE
 	var/player_pq
@@ -1536,20 +1618,28 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 
 /datum/preferences_menu/proc/build_loadout_dynamic(mob/user)
 	var/list/data = list()
-	var/list/slot_vars = list("loadout", "loadout2", "loadout3", "loadout4", "loadout5", "loadout6")
-	var/list/hex_vars = list("loadout_1_hex", "loadout_2_hex", "loadout_3_hex", "loadout_4_hex", "loadout_5_hex", "loadout_6_hex")
 	var/list/slots = list()
-	for(var/i in 1 to 6)
-		var/datum/loadout_item/item = prefs.vars[slot_vars[i]]
-		var/hex = prefs.vars[hex_vars[i]]
+	var/datum/asset/spritesheet/loadout_items/sheet = get_asset_datum(/datum/asset/spritesheet/loadout_items)
+	for(var/i in 1 to 10)
+		var/datum/loadout_item/item = prefs.vars[(i == 1) ? "loadout" : "loadout[i]"]
+		var/hex = prefs.vars["loadout_[i]_hex"]
 		slots += list(list(
 			"slot" = i,
 			"name" = item?.name || "None",
 			"desc" = item?.desc,
+			"cost" = item?.triumph_cost || 0,
 			"hex" = hex,
 			"color_name" = lookup_loadout_color_name(hex),
+			"custom_name" = prefs.vars["loadout_[i]_name"],
+			"custom_desc" = prefs.vars["loadout_[i]_desc"],
+			// Spritesheet CSS class for this item's icon (null when slot empty).
+			"icon" = item ? sheet.icon_class_name(sanitize_css_class_name("loadout_item_[REF(item)]")) : null,
 		))
 	data["slots"] = slots
+	// Point-buy economy (SW-only): base 10 + 1/vice, spent on loadout via triumph_cost.
+	data["total_points"] = prefs.get_total_points()
+	data["spent_points"] = prefs.get_loadout_points_spent()
+	data["remaining_points"] = prefs.get_remaining_points()
 	return data
 
 /// Item + preset-color picklists. Item list is donator-filtered per user but
@@ -1564,8 +1654,10 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 	var/owner_ckey = prefs.parent?.ckey || user.ckey
 	if(!cached_loadout_item_options)
 		var/list/item_names = list("None")
-		for(var/path as anything in GLOB.loadout_items)
-			var/datum/loadout_item/item = GLOB.loadout_items[path]
+		// GLOB.loadout_items is a FLAT list of /datum/loadout_item instances
+		// (global_lists.dm: `GLOB.loadout_items += loadout_item`), NOT a
+		// path->instance assoc — iterate the instances directly.
+		for(var/datum/loadout_item/item as anything in GLOB.loadout_items)
 			if(!item?.name)
 				continue
 			if(item.donoritem && !item.donator_ckey_check(owner_ckey))
@@ -1580,6 +1672,37 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			cached_color_options += k
 	data["color_options"] = cached_color_options
 	return data
+
+/// Shared loadout-slot setter. Enforces the SW-only gates the ES menu lacked:
+/// donator allowlist, per-item nobility_check, cross-slot duplicate guard, and
+/// the point-buy affordability budget. Returns TRUE if the item was placed,
+/// FALSE (with a chat warning) if rejected. Mirrors the standalone
+/// loadout_menu.dm choose_item logic so behaviour stays identical at cutover.
+/datum/preferences_menu/proc/try_place_loadout(slot, datum/loadout_item/item, mob/user)
+	if(!(slot >= 1 && slot <= 10) || !istype(item))
+		return FALSE
+	if(item.donoritem && !item.donator_ckey_check(user.ckey))
+		return FALSE
+	if(!item.nobility_check(user.client))
+		to_chat(user, span_warning("[item.name] requires nobility (the Noble virtue, or a high-priority noble/courtier/yeoman job)."))
+		return FALSE
+	var/item_cost = item.triumph_cost || 0
+	var/spent_points = 0
+	for(var/other_slot = 1 to 10)
+		if(other_slot == slot)
+			continue
+		var/datum/loadout_item/other_item = prefs.vars[(other_slot == 1) ? "loadout" : "loadout[other_slot]"]
+		if(!other_item)
+			continue
+		if(other_item == item)
+			to_chat(user, span_warning("[item.name] is already in slot [other_slot]."))
+			return FALSE
+		spent_points += (other_item.triumph_cost || 0)
+	if(spent_points + item_cost > prefs.get_total_points())
+		to_chat(user, span_warning("Not enough points! Need [item_cost], but only have [prefs.get_total_points() - spent_points] remaining."))
+		return FALSE
+	prefs.vars[(slot == 1) ? "loadout" : "loadout[slot]"] = item
+	return TRUE
 
 /datum/preferences_menu/proc/lookup_loadout_color_name(hex)
 	if(!hex)
@@ -1637,14 +1760,38 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 		mannequin.job = previewJob.title
 		previewJob.equip(mannequin, TRUE, preference_source = prefs.parent)
 
+	// Only while the Loadout tab is open, show the selected gear worn on the
+	// model. The dummy is wiped by unset_busy_human_dummy() below after the
+	// snapshot, so this never persists into other tabs' previews.
+	if(active_tab == "loadout")
+		equip_loadout_preview(mannequin)
+
 	mannequin.rebuild_obscured_flags()
-	// PHASE1: live preview rendering deferred to the preview-map spike (plan §4/#2).
-	// SW's show_character_previews is 1-arg / HUD-hardwired ("character_preview_map")
-	// and SW lacks the COMPILE_OVERLAYS macro / overlay-queue vars. Re-enable once
-	// the TGUI ByondUi preview map is wired.
-	// COMPILE_OVERLAYS(mannequin)
-	// prefs.parent.show_character_previews(new /mutable_appearance(mannequin), "tgui_preview_map")
+	// Render the dummy onto the TGUI ByondUi map (id "tgui_preview_map" in
+	// PreferencesMenu.tsx). show_character_previews now takes the map key; SW
+	// applies overlays immediately, so no COMPILE_OVERLAYS is needed — this
+	// mirrors the classic HTML chargen preview (preferences_setup.dm).
+	prefs.parent.show_character_previews(new /mutable_appearance(mannequin), "tgui_preview_map")
 	unset_busy_human_dummy(DUMMY_HUMAN_SLOT_PREFERENCES)
+
+/// Spawns each selected loadout item, applies its chosen colour, and equips it
+/// onto the preview dummy so the player can see their gear worn — visuals only.
+/// Mirrors the in-game collection path (mind.dm handle_special_items_retrieval):
+/// spawn → resolve_loadout_to_color → equip_to_appropriate_slot. Stat nerfs are
+/// skipped (they don't affect appearance). Items that can't be placed are qdel'd
+/// so nothing leaks before the dummy's wipe_state().
+/datum/preferences_menu/proc/equip_loadout_preview(mob/living/carbon/human/mannequin)
+	for(var/i in 1 to 10)
+		var/datum/loadout_item/L = prefs.vars[(i == 1) ? "loadout" : "loadout[i]"]
+		if(!L?.path)
+			continue
+		var/obj/item/equipment = new L.path()
+		var/dye = prefs.resolve_loadout_to_color(L.path)
+		if(dye)
+			equipment.add_atom_colour(dye, FIXED_COLOUR_PRIORITY)
+			equipment.update_icon()
+		if(!mannequin.equip_to_appropriate_slot(equipment))
+			qdel(equipment)
 
 /datum/preferences_menu/ui_act(action, list/params, datum/tgui/ui)
 	. = ..()
@@ -1655,11 +1802,36 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 
 	var/mob/user = ui.user
 
+	// Undo support: snapshot pre-change state before any action that mutates a
+	// field save_to_history() tracks (vices / loadout / languages). One
+	// chokepoint instead of threading save_to_history() through every handler.
+	// History self-caps at 10 entries, so a redundant snapshot from a no-op
+	// action is harmless.
+	var/static/list/undo_tracked_actions = list(
+		"set_vice_direct",
+		"set_loadout_slot",
+		"set_loadout_slot_direct",
+		"set_loadout_name",
+		"set_loadout_desc",
+		"set_loadout_hex",
+		"set_loadout_hex_direct",
+		"set_paid_language_direct",
+		"set_extra_language_direct",
+	)
+	if(action in undo_tracked_actions)
+		prefs.save_to_history()
+
 	switch(action)
 		if("set_tab")
 			var/new_tab = params["tab"]
 			if(istext(new_tab))
+				var/old_tab = active_tab
 				active_tab = new_tab
+				// Entering or leaving Loadout flips whether the preview shows the
+				// selected gear on the model, so re-render the dummy on that
+				// transition (and only then — the preview is heavy).
+				if(new_tab == "loadout" || old_tab == "loadout")
+					queue_preview_refresh()
 				// Autoupdate is disabled, so we must explicitly push so the
 				// React side gets the new tab's dynamic data. Without this,
 				// the merged `body`/`markings`/etc. object is just the static
@@ -1870,6 +2042,10 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			var/datum/virtue/v = virtues_available[picked]
 			if(!v)
 				return TRUE
+			if(prefs.check_virtue_vice_conflict(v.type, TRUE, user))
+				return TRUE
+			if(prefs.check_virtue_virtue_conflict(v.type, prefs.virtuetwo?.type, TRUE, user))
+				return TRUE
 			var/datum/virtue/old_virtue = prefs.virtue
 			prefs.virtue = v
 			sync_virtue_body_size(old_virtue, v, user)
@@ -1902,6 +2078,10 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			var/datum/virtue/v = virtues_available[picked]
 			if(!v)
 				return TRUE
+			if(prefs.check_virtue_vice_conflict(v.type, TRUE, user))
+				return TRUE
+			if(prefs.check_virtue_virtue_conflict(v.type, prefs.virtue?.type, TRUE, user))
+				return TRUE
 			var/datum/virtue/old_virtue = prefs.virtuetwo
 			prefs.virtuetwo = v
 			sync_virtue_body_size(old_virtue, v, user)
@@ -1931,6 +2111,104 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			var/charflaw_path = flaws[picked]
 			prefs.charflaw = new charflaw_path()
 			on_identity_change(TRUE)
+			return TRUE
+
+		// Multi-vice: one of vice1..vice5. Slot 1 is required (no clearing).
+		// Enforces the SW conflict engine (vice↔virtue, vice↔vice) + dup guard.
+		if("set_vice_direct")
+			var/slot = text2num(params["slot"])
+			if(!(slot >= 1 && slot <= 5))
+				return TRUE
+			var/picked = params["name"]
+			if(!picked)
+				return TRUE
+			var/vice_var = "vice[slot]"
+			if(picked == "None")
+				if(slot == 1)
+					to_chat(user, span_warning("You must keep at least one vice (slot 1)."))
+					return TRUE
+				prefs.vars[vice_var] = null
+				on_identity_change(TRUE)
+				return TRUE
+			var/list/flaws = GLOB.character_flaws
+			if(!flaws[picked])
+				return TRUE
+			var/charflaw_path = flaws[picked]
+			// Duplicate guard + gather other selected vice typepaths for the conflict check.
+			var/list/other_vice_types = list()
+			for(var/i in 1 to 5)
+				if(i == slot)
+					continue
+				var/datum/charflaw/ov = prefs.vars["vice[i]"]
+				if(!ov)
+					continue
+				if(ov.type == charflaw_path)
+					to_chat(user, span_warning("[picked] is already selected in another slot."))
+					return TRUE
+				other_vice_types += ov.type
+			if(prefs.check_vice_virtue_conflict(charflaw_path, TRUE, user))
+				return TRUE
+			if(prefs.check_vice_vice_conflict(charflaw_path, other_vice_types, TRUE, user))
+				return TRUE
+			var/datum/charflaw/new_vice = new charflaw_path()
+			prefs.vars[vice_var] = new_vice
+			// Slot 1 mirrors the legacy charflaw var (job vice-gate + spawn fallback read it).
+			if(slot == 1)
+				prefs.charflaw = new_vice
+			if(new_vice.desc)
+				to_chat(user, "<span class='info'>[new_vice.desc]</span>")
+			on_identity_change(TRUE)
+			return TRUE
+
+		if("show_vice_desc")
+			var/slot = text2num(params["slot"])
+			if(!(slot >= 1 && slot <= 5))
+				return TRUE
+			var/datum/charflaw/v = prefs.vars["vice[slot]"]
+			if(!v)
+				return TRUE
+			if(v.desc)
+				to_chat(user, "<font size = 3>[span_purple(v.desc)]</font>")
+			return TRUE
+
+		// --- Character presets (statpack/virtue/vices/loadout/languages) + undo ---
+
+		if("save_preset")
+			var/slot = text2num(params["slot"])
+			if(!(slot >= 1 && slot <= 3))
+				return TRUE
+			if(prefs.save_preset(slot))
+				to_chat(user, span_notice("Saved preset [slot]."))
+				on_identity_change()
+			return TRUE
+
+		if("load_preset")
+			var/slot = text2num(params["slot"])
+			if(!(slot >= 1 && slot <= 3))
+				return TRUE
+			if(prefs.load_preset(slot))
+				to_chat(user, span_notice("Loaded preset [slot]."))
+				// Restores statpack/virtue/vices/loadout/langs → full static refresh.
+				on_identity_change(TRUE)
+			else
+				to_chat(user, span_warning("Preset [slot] is empty."))
+			return TRUE
+
+		if("clear_preset")
+			var/slot = text2num(params["slot"])
+			if(!(slot >= 1 && slot <= 3))
+				return TRUE
+			if(prefs.clear_preset(slot))
+				to_chat(user, span_notice("Cleared preset [slot]."))
+				on_identity_change()
+			return TRUE
+
+		if("undo_change")
+			if(prefs.undo_last_change())
+				to_chat(user, span_notice("Reverted last change."))
+				on_identity_change(TRUE)
+			else
+				to_chat(user, span_warning("Nothing to undo."))
 			return TRUE
 
 		if("set_species")
@@ -2063,32 +2341,18 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			return TRUE
 
 		if("set_origin")
-			var/list/virtue_choices = list()
-			for(var/path as anything in GLOB.virtues)
-				var/datum/virtue/V = GLOB.virtues[path]
-				if(!V?.name)
+			var/list/origin_choices = list()
+			for(var/path as anything in GLOB.origins)
+				var/datum/origin/O = GLOB.origins[path]
+				if(!O?.name)
 					continue
-				if(prefs.virtue_origin && V.name == prefs.virtue_origin.name)
-					continue
-				if(!istype(V, /datum/virtue/origin))
-					continue
-				if(V.restricted && (prefs.pref_species.type in V.races))
-					continue
-				if(istype(V, /datum/virtue/origin/racial) && !(prefs.pref_species.type in V.races))
-					continue
-				virtue_choices[V.name] = V
-			var/picked = tgui_input_list(user, "From where do you come?", "ORIGINS", virtue_choices)
+				origin_choices[O.name] = O
+			var/picked = tgui_input_list(user, "From where do you come?", "ORIGINS", origin_choices)
 			if(picked)
-				var/datum/virtue/virtue_chosen = virtue_choices[picked]
-				prefs.virtue_origin = virtue_chosen
-				to_chat(user, prefs.process_virtue_text(virtue_chosen))
-				if(virtue_chosen.uniquefaith)
-					var/datum/virtue/origin/origin_chosen = virtue_chosen
-					prefs.selected_patron = GLOB.patronlist[origin_chosen.uniquefaith[1].godhead]
-				else
-					prefs.selected_patron = GLOB.patronlist[/datum/patron/divine/astrata]
-				// Origin swap invalidates faith options (uniquefaith), extra_language options,
-				// patron options (selected_patron may flip), and job availability (virtue_restrictions).
+				prefs.origin = origin_choices[picked]
+				if(prefs.origin?.desc)
+					to_chat(user, span_info(prefs.origin.desc))
+				// Origin swap invalidates extra_language options and job availability.
 				on_identity_change(TRUE)
 			return TRUE
 
@@ -2096,33 +2360,22 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			var/picked = params["name"]
 			if(!picked)
 				return TRUE
-			for(var/path as anything in GLOB.virtues)
-				var/datum/virtue/V = GLOB.virtues[path]
-				if(!V?.name || V.name != picked)
+			for(var/path as anything in GLOB.origins)
+				var/datum/origin/O = GLOB.origins[path]
+				if(!O?.name || O.name != picked)
 					continue
-				if(!istype(V, /datum/virtue/origin))
-					continue
-				if(V.restricted && (prefs.pref_species?.type in V.races))
-					continue
-				if(istype(V, /datum/virtue/origin/racial) && !(prefs.pref_species?.type in V.races))
-					continue
-				prefs.virtue_origin = V
+				prefs.origin = O
 				// Auto-print is suppressed — the (i) tooltip button next to the
 				// Origin Dropdown invokes show_origin_help on demand instead.
-				if(V.uniquefaith)
-					var/datum/virtue/origin/origin_chosen = V
-					prefs.selected_patron = GLOB.patronlist[origin_chosen.uniquefaith[1].godhead]
-				else
-					prefs.selected_patron = GLOB.patronlist[/datum/patron/divine/astrata]
 				on_identity_change(TRUE)
 				return TRUE
 			return TRUE
 
 		if("show_origin_help")
-			if(!prefs.virtue_origin)
+			if(!prefs.origin)
 				to_chat(user, span_info("No origin selected."))
 				return TRUE
-			to_chat(user, prefs.process_virtue_text(prefs.virtue_origin))
+			to_chat(user, span_info(prefs.origin.desc))
 			return TRUE
 
 		if("show_virtue_desc")
@@ -3135,21 +3388,21 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 
 		if("edit_gossip")
 			to_chat(user, "<span class='notice'><span class='bold'>Gossip is rumours spread around Noble circles. Only other well-born individuals are aware of it.</span></span>")
-			var/new_text = tgui_input_text(user, "Input noble gossip about your character (400 character limit):", "Noble Gossip", prefs.gossip, multiline = TRUE, encode = FALSE, bigmodal = TRUE)
+			var/new_text = tgui_input_text(user, "Input noble gossip about your character (400 character limit):", "Noble Gossip", prefs.noble_gossip, multiline = TRUE, encode = FALSE, bigmodal = TRUE)
 			if(isnull(new_text))
 				return TRUE
 			if(new_text == "")
-				prefs.gossip = null
-				prefs.gossip_display = null
+				prefs.noble_gossip = null
+				prefs.noble_gossip_display = null
 				prefs.is_legacy = FALSE
 			else
 				if(length(new_text) > 400)
 					to_chat(user, span_warning("Noble gossip cannot exceed 400 characters."))
 					return TRUE
-				prefs.gossip = new_text
+				prefs.noble_gossip = new_text
 				var/g = html_encode(new_text)
 				g = replacetext(parsemarkdown_basic(g), "\n", "<BR>")
-				prefs.gossip_display = g
+				prefs.noble_gossip_display = g
 				prefs.is_legacy = FALSE
 				to_chat(user, span_notice("Successfully updated Noble Gossip"))
 				log_game("[user] has set their noble gossip.")
@@ -3302,14 +3555,14 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			to_chat(user, span_notice("Add a link from a suitable host (catbox, etc) to an mp3, mp4, or jpg / png / gif file to embed it in your NSFW flavor text."))
 			to_chat(user, "<font color = '#d6d6d6'>Leave a single space to delete it.</font>")
 			to_chat(user, "<font color ='red'>Abuse of this will get you banned.</font>")
-			var/new_nsfw_extra = tgui_input_text(user, "Input the NSFW accessory link (https, hosts: gyazo, discord, lensdump, imgbox, catbox):", "NSFW OOC Extra", prefs.nsfw_ooc_extra_link, encode = FALSE)
+			var/new_nsfw_extra = tgui_input_text(user, "Input the NSFW accessory link (https, hosts: gyazo, discord, lensdump, imgbox, catbox):", "NSFW OOC Extra", prefs.nsfw_ooc_extra_img_link, encode = FALSE)
 			if(new_nsfw_extra == null)
 				return TRUE
 			if(new_nsfw_extra == "")
 				return TRUE
 			if(new_nsfw_extra == " ") //Single space to delete
-				prefs.nsfw_ooc_extra_link = null
-				prefs.nsfw_ooc_extra = null
+				prefs.nsfw_ooc_extra_img_link = null
+				prefs.nsfw_ooc_extra_img = null
 				to_chat(user, span_notice("Successfully deleted NSFW OOC Extra."))
 				on_identity_change()
 				return TRUE
@@ -3320,30 +3573,30 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			var/nsfw_extra_extension = nsfw_extra_split[length(nsfw_extra_split)]
 			var/nsfw_extra_info
 			if(nsfw_extra_extension in nsfw_extra_ext)
-				prefs.nsfw_ooc_extra_link = new_nsfw_extra
-				prefs.nsfw_ooc_extra = "<div align ='center'><center>"
+				prefs.nsfw_ooc_extra_img_link = new_nsfw_extra
+				prefs.nsfw_ooc_extra_img = "<div align ='center'><center>"
 				if(nsfw_extra_extension == "jpg" || nsfw_extra_extension == "png" || nsfw_extra_extension == "jpeg" || nsfw_extra_extension == "gif")
-					prefs.nsfw_ooc_extra += "<br>"
-					prefs.nsfw_ooc_extra += "<img src='[prefs.nsfw_ooc_extra_link]'/>"
+					prefs.nsfw_ooc_extra_img += "<br>"
+					prefs.nsfw_ooc_extra_img += "<img src='[prefs.nsfw_ooc_extra_img_link]'/>"
 					nsfw_extra_info = "an embedded image."
 				else
 					switch(nsfw_extra_extension)
 						if("mp4")
-							prefs.nsfw_ooc_extra = "<br>"
-							prefs.nsfw_ooc_extra += "<video width=["288"] height=["288"] controls=["true"]>"
-							prefs.nsfw_ooc_extra += "<source src='[prefs.nsfw_ooc_extra_link]' type=["video/mp4"]>"
-							prefs.nsfw_ooc_extra += "</video>"
+							prefs.nsfw_ooc_extra_img = "<br>"
+							prefs.nsfw_ooc_extra_img += "<video width=["288"] height=["288"] controls=["true"]>"
+							prefs.nsfw_ooc_extra_img += "<source src='[prefs.nsfw_ooc_extra_img_link]' type=["video/mp4"]>"
+							prefs.nsfw_ooc_extra_img += "</video>"
 							nsfw_extra_info = "a video."
 						if("mp3")
-							prefs.nsfw_ooc_extra = "<br>"
-							prefs.nsfw_ooc_extra += "<audio controls>"
-							prefs.nsfw_ooc_extra += "<source src='[prefs.nsfw_ooc_extra_link]' type=["audio/mp3"]>"
-							prefs.nsfw_ooc_extra += "Your browser does not support the audio element."
-							prefs.nsfw_ooc_extra += "</audio>"
+							prefs.nsfw_ooc_extra_img = "<br>"
+							prefs.nsfw_ooc_extra_img += "<audio controls>"
+							prefs.nsfw_ooc_extra_img += "<source src='[prefs.nsfw_ooc_extra_img_link]' type=["audio/mp3"]>"
+							prefs.nsfw_ooc_extra_img += "Your browser does not support the audio element."
+							prefs.nsfw_ooc_extra_img += "</audio>"
 							nsfw_extra_info = "embedded audio."
-				prefs.nsfw_ooc_extra += "</center></div>"
+				prefs.nsfw_ooc_extra_img += "</center></div>"
 				to_chat(user, span_notice("Successfully updated NSFW OOC Extra with [nsfw_extra_info]"))
-				log_game("[user] has set their NSFW OOC Extra to '[prefs.nsfw_ooc_extra_link]'.")
+				log_game("[user] has set their NSFW OOC Extra to '[prefs.nsfw_ooc_extra_img_link]'.")
 				on_identity_change()
 			return TRUE
 
@@ -3622,11 +3875,10 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 
 		if("set_loadout_slot")
 			var/slot = text2num(params["slot"])
-			if(!(slot in list(1, 2, 3, 4, 5, 6)))
+			if(!(slot >= 1 && slot <= 10))
 				return TRUE
 			var/list/loadouts_available = list("None")
-			for(var/path as anything in GLOB.loadout_items)
-				var/datum/loadout_item/item = GLOB.loadout_items[path]
+			for(var/datum/loadout_item/item as anything in GLOB.loadout_items)
 				if(item.donoritem && !item.donator_ckey_check(user.ckey))
 					continue
 				if(!item.name)
@@ -3641,16 +3893,16 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 				to_chat(user, "Who needs stuff anyway?")
 			else
 				var/datum/loadout_item/picked_item = loadouts_available[picked]
-				prefs.vars[slot_var] = picked_item
-				to_chat(user, "<font color='yellow'><b>[picked_item.name]</b></font>")
-				if(picked_item.desc)
-					to_chat(user, "[picked_item.desc]")
+				if(try_place_loadout(slot, picked_item, user))
+					to_chat(user, "<font color='yellow'><b>[picked_item.name]</b></font>")
+					if(picked_item.desc)
+						to_chat(user, "[picked_item.desc]")
 			on_identity_change()
 			return TRUE
 
 		if("set_loadout_slot_direct")
 			var/slot = text2num(params["slot"])
-			if(!(slot in list(1, 2, 3, 4, 5, 6)))
+			if(!(slot >= 1 && slot <= 10))
 				return TRUE
 			var/picked = params["name"]
 			if(!picked)
@@ -3660,26 +3912,49 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 				prefs.vars[slot_var] = null
 				on_identity_change()
 				return TRUE
-			for(var/path as anything in GLOB.loadout_items)
-				var/datum/loadout_item/item = GLOB.loadout_items[path]
+			for(var/datum/loadout_item/item as anything in GLOB.loadout_items)
 				if(!item?.name || item.name != picked)
 					continue
-				if(item.donoritem && !item.donator_ckey_check(user.ckey))
-					return TRUE
-				prefs.vars[slot_var] = item
-				if(item.desc)
-					to_chat(user, "[item.desc]")
-				on_identity_change()
+				if(try_place_loadout(slot, item, user))
+					if(item.desc)
+						to_chat(user, "[item.desc]")
+					on_identity_change()
 				return TRUE
+			return TRUE
+
+		if("set_loadout_name")
+			var/slot = text2num(params["slot"])
+			if(!(slot >= 1 && slot <= 10))
+				return TRUE
+			var/name_var = "loadout_[slot]_name"
+			var/new_name = tgui_input_text(user, "Custom name for this loadout item (blank to clear):", "Rename Loadout Item", prefs.vars[name_var], max_length = 64, encode = FALSE)
+			if(isnull(new_name))
+				return TRUE
+			new_name = trim(new_name)
+			prefs.vars[name_var] = length(new_name) ? new_name : null
+			on_identity_change()
+			return TRUE
+
+		if("set_loadout_desc")
+			var/slot = text2num(params["slot"])
+			if(!(slot >= 1 && slot <= 10))
+				return TRUE
+			var/desc_var = "loadout_[slot]_desc"
+			var/new_desc = tgui_input_text(user, "Custom description for this loadout item (blank to clear):", "Describe Loadout Item", prefs.vars[desc_var], max_length = 256, multiline = TRUE, encode = FALSE)
+			if(isnull(new_desc))
+				return TRUE
+			new_desc = trim(new_desc)
+			prefs.vars[desc_var] = length(new_desc) ? new_desc : null
+			on_identity_change()
 			return TRUE
 
 		if("set_loadout_hex")
 			var/slot = text2num(params["slot"])
-			if(!(slot in list(1, 2, 3, 4, 5, 6)))
+			if(!(slot >= 1 && slot <= 10))
 				return TRUE
 			var/hex_var = "loadout_[slot]_hex"
 			var/picked = tgui_input_list(user, "Choose a color.", "Loadout Item Color", GLOB.colorlist)
-			var/slot_label_words = list("first", "second", "third", "fourth", "fifth", "sixth")
+			var/static/list/slot_label_words = list("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth")
 			if(picked && GLOB.colorlist[picked])
 				prefs.vars[hex_var] = GLOB.colorlist[picked]
 				to_chat(user, "The colour for your <b>[slot_label_words[slot]]</b> loadout item has been set to <b>[picked]</b>.")
@@ -3691,7 +3966,7 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 
 		if("set_loadout_hex_direct")
 			var/slot = text2num(params["slot"])
-			if(!(slot in list(1, 2, 3, 4, 5, 6)))
+			if(!(slot >= 1 && slot <= 10))
 				return TRUE
 			var/hex_var = "loadout_[slot]_hex"
 			var/picked = params["name"]
@@ -3815,8 +4090,8 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			return TRUE
 
 		if("set_extra_language")
-			if(!prefs.virtue_origin?.extra_language)
-				to_chat(user, span_warning("Your current Origin does not grant a free language."))
+			if(prefs.origin?.origin_language)
+				to_chat(user, span_warning("Your current Origin grants a fixed language; no free pick."))
 				return TRUE
 			var/static/list/selectable_languages = list(
 				/datum/language/grenzelhoftian,
@@ -3844,8 +4119,8 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			return TRUE
 
 		if("set_extra_language_direct")
-			if(!prefs.virtue_origin?.extra_language)
-				to_chat(user, span_warning("Your current Origin does not grant a free language."))
+			if(prefs.origin?.origin_language)
+				to_chat(user, span_warning("Your current Origin grants a fixed language; no free pick."))
 				return TRUE
 			var/picked = params["name"]
 			if(!picked)
@@ -3875,6 +4150,54 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 				return TRUE
 			return TRUE
 
+		// Paid triumph-language slots (1 = 2 TRI, 2 = 4 TRI). Affordability is
+		// checked against the live triumph pool but NOT deducted at chargen,
+		// matching the legacy HTML menu.
+		if("set_paid_language_direct")
+			var/slot = text2num(params["slot"])
+			if(!(slot == 1 || slot == 2))
+				return TRUE
+			var/picked = params["name"]
+			if(!picked)
+				return TRUE
+			var/slot_var = (slot == 1) ? "extra_language_1" : "extra_language_2"
+			if(picked == "None")
+				prefs.vars[slot_var] = "None"
+				on_identity_change()
+				return TRUE
+			// Resolve picked name -> typepath from the roster (excluding species langs).
+			var/chosen_path
+			for(var/language in paid_language_roster())
+				if(language in prefs.pref_species?.languages)
+					continue
+				var/datum/language/L = language
+				if(initial(L.name) == picked)
+					chosen_path = language
+					break
+			if(!chosen_path)
+				return TRUE
+			// Dedup against the free pick and the other paid slot.
+			if(prefs.extra_language == chosen_path)
+				to_chat(user, span_warning("[picked] is already your free language."))
+				return TRUE
+			var/other_var = (slot == 1) ? "extra_language_2" : "extra_language_1"
+			if(prefs.vars[other_var] == chosen_path)
+				to_chat(user, span_warning("[picked] is already selected in the other language slot."))
+				return TRUE
+			// Affordability against the live triumph pool.
+			var/slot_cost = (slot == 1) ? 2 : 4
+			var/spent = 0
+			if(prefs.vars[other_var] && prefs.vars[other_var] != "None")
+				spent += (slot == 1) ? 4 : 2
+			var/total_triumphs = user.get_triumphs()
+			if(spent + slot_cost > total_triumphs)
+				to_chat(user, span_warning("Not enough triumphs! Need [slot_cost], but only have [total_triumphs - spent] remaining."))
+				return TRUE
+			prefs.vars[slot_var] = chosen_path
+			to_chat(user, span_notice("Selected [picked] for language slot [slot] ([slot_cost] Triumphs)."))
+			on_identity_change()
+			return TRUE
+
 		if("set_race_title")
 			if(!prefs.pref_species?.use_titles)
 				return TRUE
@@ -3901,18 +4224,11 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 
 		if("set_faith")
 			var/list/faiths_named = list()
-			if(prefs.virtue_origin?.uniquefaith)
-				for(var/path as anything in prefs.virtue_origin.uniquefaith)
-					var/datum/faith/faith = GLOB.faithlist[path]
-					if(!faith?.name)
-						continue
-					faiths_named[faith.name] = faith
-			else
-				for(var/path as anything in GLOB.preference_faiths)
-					var/datum/faith/faith = GLOB.faithlist[path]
-					if(!faith?.name)
-						continue
-					faiths_named[faith.name] = faith
+			for(var/path as anything in GLOB.preference_faiths)
+				var/datum/faith/faith = GLOB.faithlist[path]
+				if(!faith?.name)
+					continue
+				faiths_named[faith.name] = faith
 			var/picked = tgui_input_list(user, "The world rots. Which truth you bear?", "FAITH", faiths_named)
 			if(picked)
 				var/datum/faith/faith = faiths_named[picked]
@@ -3930,6 +4246,8 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			for(var/path as anything in GLOB.patrons_by_faith[faith_key])
 				var/datum/patron/patron = GLOB.patronlist[path]
 				if(!patron?.name)
+					continue
+				if(patron.disabled_patron)
 					continue
 				patrons_named[patron.name] = patron
 			var/picked = tgui_input_list(user, "The first amongst many.", "PATRON", patrons_named)
@@ -3961,22 +4279,18 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			if(!picked)
 				return TRUE
 			var/list/faiths_named = list()
-			if(prefs.virtue_origin?.uniquefaith)
-				for(var/path as anything in prefs.virtue_origin.uniquefaith)
-					var/datum/faith/faith = GLOB.faithlist[path]
-					if(!faith?.name)
-						continue
-					faiths_named[faith.name] = faith
-			else
-				for(var/path as anything in GLOB.preference_faiths)
-					var/datum/faith/faith = GLOB.faithlist[path]
-					if(!faith?.name)
-						continue
-					faiths_named[faith.name] = faith
+			for(var/path as anything in GLOB.preference_faiths)
+				var/datum/faith/faith = GLOB.faithlist[path]
+				if(!faith?.name)
+					continue
+				faiths_named[faith.name] = faith
 			var/datum/faith/faith = faiths_named[picked]
 			if(!faith)
 				return TRUE
-			prefs.selected_patron = GLOB.patronlist[faith.godhead] || GLOB.patronlist[pick(GLOB.patrons_by_faith[picked])]
+			// patrons_by_faith is keyed by faith TYPEPATH, not name; guard the
+			// fallback so a faith with no godhead can't pick() an empty list.
+			var/list/faith_patrons = GLOB.patrons_by_faith[faith.type]
+			prefs.selected_patron = GLOB.patronlist[faith.godhead] || (length(faith_patrons) ? GLOB.patronlist[pick(faith_patrons)] : null)
 			on_identity_change(TRUE)
 			return TRUE
 
@@ -3989,6 +4303,8 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 				var/datum/patron/patron = GLOB.patronlist[path]
 				if(!patron?.name || patron.name != picked)
 					continue
+				if(patron.disabled_patron)
+					return TRUE
 				prefs.selected_patron = patron
 				on_identity_change(TRUE)
 				return TRUE
@@ -4015,7 +4331,7 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 				prefs.family = picked
 				prefs.setspouse = null
 				prefs.gender_choice = ANY_GENDER
-				prefs.xenophobe_pref = 1
+				prefs.xenophobe_pref = 0
 				on_identity_change()
 			return TRUE
 
@@ -4031,7 +4347,7 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			prefs.family = picked
 			prefs.setspouse = null
 			prefs.gender_choice = ANY_GENDER
-			prefs.xenophobe_pref = 1
+			prefs.xenophobe_pref = 0
 			on_identity_change()
 			return TRUE
 
@@ -4265,8 +4581,11 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 	var/list/out = list()
 	if(!prefs)
 		return out
-	var/species_type = prefs.pref_species?.type
 	var/heretic = istype(prefs.selected_patron, /datum/patron/inhumen)
+	// SW gates virtues per-species via restricted_virtues (a forbidden-list on
+	// the species), NOT via ES's virtue-side restricted/races fields (which are
+	// inert _port_shims stubs that never populate). Mirror vices_menu.dm.
+	var/list/restricted_virtues = prefs.pref_species?.restricted_virtues
 	for(var/path as anything in GLOB.virtues)
 		var/datum/virtue/v = GLOB.virtues[path]
 		if(!v?.name)
@@ -4275,9 +4594,7 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 			continue
 		if(istype(v, /datum/virtue/heretic) && !heretic)
 			continue
-		if(v.restricted && species_type && (species_type in v.races))
-			continue
-		if(istype(v, /datum/virtue/racial) && species_type && !(species_type in v.races))
+		if(length(restricted_virtues) && (path in restricted_virtues))
 			continue
 		out[v.name] = v
 	return sort_list(out)
@@ -4286,6 +4603,9 @@ GLOBAL_VAR_INIT(cached_lobby_snapshot_at, 0)
 /datum/preferences/proc/open_preferences_menu(mob/user)
 	if(!user)
 		return
+	// Mutual exclusion: the two chargen UIs are never shown at once. Opening the
+	// TGUI menu closes the classic HTML chargen window(s).
+	close_legacy_chargen(user)
 	if(!preferences_menu)
 		preferences_menu = new(src)
 	preferences_menu.ui_interact(user)

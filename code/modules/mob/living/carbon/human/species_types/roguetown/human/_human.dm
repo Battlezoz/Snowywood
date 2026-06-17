@@ -1,6 +1,8 @@
 /datum/species/human
 	name = "Humanb"
+	base_name = "Humen"
 	id = "human"
+	psydonic = TRUE	// covers Humen + Half-Elf (/datum/species/human/halfelf)
 
 /datum/species/human/on_species_gain(mob/living/carbon/C, datum/species/old_species)
 	. = ..()

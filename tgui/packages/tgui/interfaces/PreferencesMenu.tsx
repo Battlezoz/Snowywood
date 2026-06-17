@@ -383,7 +383,7 @@ export const PreferencesMenu = (props) => {
   const canClose = true;
 
   return (
-    <Window width={1400} height={820} canClose={canClose}>
+    <Window width={1600} height={820} canClose={canClose}>
       <Window.Content>
         <Stack fill>
           <Stack.Item width="280px">

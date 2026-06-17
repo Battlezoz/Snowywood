@@ -3,6 +3,7 @@
 
 /datum/species/human/northern
 	name = "Humen"
+	sub_name = "Northern Humen"
 	id = "humen"
 	desc = "<b>Humen</b><br>\
 	Humens (or \"Humans\") are the eldest of the Weeping God's creations. Noted for their \

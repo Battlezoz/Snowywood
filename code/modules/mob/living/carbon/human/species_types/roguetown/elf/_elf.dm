@@ -3,7 +3,9 @@
 
 /datum/species/elf
 	name = "Elfb"
+	base_name = "Elf"
 	id = "elf"
+	psydonic = TRUE	// covers Wood Elf + Dark Elf
 	max_age = 850
 	organs = list(
 		ORGAN_SLOT_BRAIN = /obj/item/organ/brain,

@@ -36,7 +36,10 @@ type IdentityData = {
   virtue_name: string;
   virtuetwo_name: string;
   show_virtuetwo: 0 | 1;
-  charflaw_name: string;
+  vice_names: string[];
+  vice_points: number;
+  preset_summaries: string[];
+  can_undo: 0 | 1;
   faith_name: string;
   patron_name: string;
   domhand: number;
@@ -50,6 +53,11 @@ type IdentityData = {
   gender: string;
   agender_species: 0 | 1;
   extra_language_name: string;
+  paid_language_1: string;
+  paid_language_2: string;
+  paid_language_options: string[];
+  triumphs: number;
+  paid_language_spent: number;
   species_options: string[];
   subspecies_options: string[];
   origin_options: string[];
@@ -439,25 +447,43 @@ export const IdentityTab = (props) => {
                 />
               </LabeledList.Item>
             )}
-            <LabeledList.Item label="Vice">
-              <Dropdown
-                width="160px"
-                menuWidth="220px"
-                selected={id.charflaw_name}
-                displayText={id.charflaw_name}
-                options={[id.charflaw_name, ...id.charflaw_options]}
-                onSelected={(value) =>
-                  value !== id.charflaw_name &&
-                  act('set_charflaw_direct', { name: value })
-                }
-              />
-              <Button
-                ml={0.5}
-                icon="circle-info"
-                tooltip="Print this vice's description to chat"
-                onClick={() => act('show_charflaw_desc')}
-              />
-            </LabeledList.Item>
+            {(id.vice_names ?? []).map((vn, idx) => {
+              const slot = idx + 1;
+              // Slot 1 is required; slots 2-5 may be cleared via "None".
+              const opts =
+                slot === 1
+                  ? id.charflaw_options
+                  : ['None', ...id.charflaw_options];
+              return (
+                <LabeledList.Item
+                  key={slot}
+                  label={slot === 1 ? 'Vice' : `Vice ${slot}`}
+                >
+                  <Dropdown
+                    width="160px"
+                    menuWidth="220px"
+                    selected={vn}
+                    displayText={vn}
+                    options={opts}
+                    onSelected={(value) =>
+                      value !== vn &&
+                      act('set_vice_direct', { slot: slot, name: value })
+                    }
+                  />
+                  <Button
+                    ml={0.5}
+                    icon="circle-info"
+                    tooltip="Print this vice's description to chat"
+                    onClick={() => act('show_vice_desc', { slot: slot })}
+                  />
+                  {slot === 1 && (
+                    <Box inline ml={1} color="label">
+                      +{id.vice_points} pt{id.vice_points === 1 ? '' : 's'}
+                    </Box>
+                  )}
+                </LabeledList.Item>
+              );
+            })}
             <LabeledList.Item label="Faith">
               <Dropdown
                 width="160px"
@@ -639,6 +665,40 @@ export const IdentityTab = (props) => {
                 </Box>
               )}
             </LabeledList.Item>
+            <LabeledList.Item label="Paid Language I">
+              <Dropdown
+                width="180px"
+                menuWidth="220px"
+                selected={id.paid_language_1}
+                displayText={id.paid_language_1}
+                options={id.paid_language_options}
+                onSelected={(value) =>
+                  value !== id.paid_language_1 &&
+                  act('set_paid_language_direct', { slot: 1, name: value })
+                }
+              />
+              <Box inline ml={1} color="label">
+                2 triumphs
+              </Box>
+            </LabeledList.Item>
+            <LabeledList.Item label="Paid Language II">
+              <Dropdown
+                width="180px"
+                menuWidth="220px"
+                selected={id.paid_language_2}
+                displayText={id.paid_language_2}
+                options={id.paid_language_options}
+                onSelected={(value) =>
+                  value !== id.paid_language_2 &&
+                  act('set_paid_language_direct', { slot: 2, name: value })
+                }
+              />
+              <Box inline ml={1} color="label">
+                4 triumphs (
+                {Math.max(0, (id.triumphs ?? 0) - (id.paid_language_spent ?? 0))}{' '}
+                left)
+              </Box>
+            </LabeledList.Item>
             {!!id.has_lamian_tail && (
               <>
                 <LabeledList.Item label="Tail Type">
@@ -681,6 +741,60 @@ export const IdentityTab = (props) => {
       </Stack.Item>
 
       {/* Body + Markings sections moved to the Features tab. */}
+
+      {/* Character presets — snapshot/restore statpack, virtue, vices, loadout
+          and languages across 3 slots, plus a single-step undo. */}
+      <Stack.Item>
+        <Section
+          title="Presets"
+          buttons={
+            <Button
+              icon="rotate-left"
+              disabled={!id.can_undo}
+              tooltip="Revert the last vice / loadout / language change"
+              onClick={() => act('undo_change')}
+            >
+              Undo
+            </Button>
+          }
+        >
+          <LabeledList>
+            {(id.preset_summaries ?? []).map((summary, idx) => {
+              const slot = idx + 1;
+              const empty = !summary || summary === 'Empty';
+              return (
+                <LabeledList.Item key={slot} label={`Preset ${slot}`}>
+                  <Box inline color={empty ? 'label' : 'good'} mr={1}>
+                    {summary || 'Empty'}
+                  </Box>
+                  <Button
+                    icon="floppy-disk"
+                    tooltip="Save current character to this slot"
+                    onClick={() => act('save_preset', { slot: slot })}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    icon="download"
+                    disabled={empty}
+                    tooltip="Load this slot onto your character"
+                    onClick={() => act('load_preset', { slot: slot })}
+                  >
+                    Load
+                  </Button>
+                  <Button
+                    icon="trash"
+                    color="bad"
+                    disabled={empty}
+                    tooltip="Clear this slot"
+                    onClick={() => act('clear_preset', { slot: slot })}
+                  />
+                </LabeledList.Item>
+              );
+            })}
+          </LabeledList>
+        </Section>
+      </Stack.Item>
 
     </Stack>
   );

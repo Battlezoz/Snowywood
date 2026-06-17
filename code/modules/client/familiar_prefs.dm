@@ -73,7 +73,7 @@
 	popup.set_content(dat.Join())
 	popup.open(FALSE)
 
-/datum/familiar_prefs/proc/fam_process_link(mob/user, list/href_list)
+/datum/familiar_prefs/proc/fam_process_link(mob/user, list/href_list, from_tgui = FALSE)
 	if(!user)
 		return
 
@@ -97,8 +97,9 @@
 				"they/them" = THEY_THEM,
 				"it/its" = IT_ITS
 			)
-			var/choice = input(user, "Select your familiar's pronouns:", "Pronouns") as null|anything in pronoun_options
-			if(choice)
+			// TGUI Dropdown sends its pick via picked_name; classic path prompts.
+			var/choice = from_tgui ? href_list["picked_name"] : (input(user, "Select your familiar's pronouns:", "Pronouns") as null|anything in pronoun_options)
+			if(choice && pronoun_options[choice])
 				familiar_pronouns = pronoun_options[choice]
 				to_chat(user, "<span class='notice'>Familiar pronouns set to [choice].</span>")
 				
@@ -216,7 +217,7 @@
 		if ("familiar_specie")
 			var/list/all_types = GLOB.familiar_types
 
-			var/choice = input(user, "Select a Familiar type:", "Familiar Type") as null|anything in all_types
+			var/choice = from_tgui ? href_list["picked_name"] : (input(user, "Select a Familiar type:", "Familiar Type") as null|anything in all_types)
 			if (choice)
 				var/path = all_types[choice]
 				if (path)
@@ -226,5 +227,6 @@
 				else
 					to_chat(user, span_warning("Something went wrong selecting that familiar type."))
 
-	if(user.client)
+	// In the TGUI menu the React tab is the UI; don't pop the classic browser over it.
+	if(user.client && !from_tgui)
 		fam_show_ui()

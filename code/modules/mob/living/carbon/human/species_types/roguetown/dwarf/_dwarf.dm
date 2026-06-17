@@ -4,6 +4,7 @@
 /datum/species/dwarf
 	name = "Dwarfb"
 	id = "dwarf"
+	psydonic = TRUE	// covers Mountain Dwarf (+ gnome subtype)
 	max_age = 200
 	languages = list(
 		/datum/language/common,

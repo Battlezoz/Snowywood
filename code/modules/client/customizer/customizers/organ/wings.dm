@@ -83,6 +83,38 @@
 		if(wings_entry.dye_gradient != /datum/hair_gradient/none)
 			dat += "<br>Dye Color: <a href='?_src_=prefs;task=change_customizer;customizer=[customizer_type];customizer_task=dye_gradient_color''><span class='color_holder_box' style='background-color:[wings_entry.dye_color]'></span></a>"
 
+/// TGUI read side mirroring generate_pref_choices: wing-type rotate (from parent)
+/// + wings color + natural/dye gradient choosers (each with its own color).
+/datum/customizer_choice/organ/wings/get_pref_data(datum/preferences/prefs, datum/customizer_entry/entry)
+	var/list/pickers = ..()
+	var/datum/customizer/organ/wings/wings_entry = entry
+	var/datum/sprite_accessory/wings/wing_accessory = SPRITE_ACCESSORY(entry.accessory_type)
+	if(!wing_accessory)
+		return pickers
+	// Multi-key colorable wings: per-key swatches (parent skips these for wings).
+	if(wing_accessory.color_keys > 1)
+		pickers += list(list("type" = "reset_colors", "text" = "Reset colors", "task" = "reset_colors"))
+		var/list/color_list = color_string_to_list(entry.accessory_colors)
+		for(var/index in 1 to wing_accessory.color_keys)
+			var/lbl = (wing_accessory.color_keys == 1) ? wing_accessory.color_key_name : wing_accessory.color_key_names[index]
+			pickers += list(list("type" = "color", "label" = lbl, "color" = color_list[index], "task" = "acc_color", "extra" = list("color_index" = "[index]")))
+		return pickers
+	var/list/grad_names = list()
+	for(var/gname in hair_gradient_name_to_type_list())
+		grad_names += gname
+	pickers += list(list("type" = "color", "label" = "Wings Color", "color" = wings_entry.wings_color, "task" = "wings_color"))
+	if(allows_natural_gradient)
+		var/datum/hair_gradient/ng = HAIR_GRADIENT(wings_entry.natural_gradient)
+		pickers += list(list("type" = "rotate", "label" = "Natural Gradient", "text" = ng.name, "task" = "natural_gradient", "options" = grad_names))
+		if(wings_entry.natural_gradient != /datum/hair_gradient/none)
+			pickers += list(list("type" = "color", "label" = "Natural Color", "color" = wings_entry.natural_color, "task" = "natural_gradient_color"))
+	if(allows_dye_gradient)
+		var/datum/hair_gradient/dg = HAIR_GRADIENT(wings_entry.dye_gradient)
+		pickers += list(list("type" = "rotate", "label" = "Dye Gradient", "text" = dg.name, "task" = "dye_gradient", "options" = grad_names))
+		if(wings_entry.dye_gradient != /datum/hair_gradient/none)
+			pickers += list(list("type" = "color", "label" = "Dye Color", "color" = wings_entry.dye_color, "task" = "dye_gradient_color"))
+	return pickers
+
 /datum/customizer_choice/organ/wings/handle_topic(mob/user, list/href_list, datum/preferences/prefs, datum/customizer_entry/entry, customizer_type)
 	..()
 	var/datum/customizer/organ/wings/wings_entry = entry
@@ -96,7 +128,9 @@
 			if(!allows_natural_gradient)
 				return
 			var/list/choice_list = hair_gradient_name_to_type_list()
-			var/chosen_input = input(user, "Choose your natural gradient:", "Character Preference")  as null|anything in choice_list
+			var/chosen_input = href_list["picked_name"]
+			if(!chosen_input || !(chosen_input in choice_list))
+				chosen_input = input(user, "Choose your natural gradient:", "Character Preference")  as null|anything in choice_list
 			if(!chosen_input)
 				return
 			wings_entry.natural_gradient = choice_list[chosen_input]
@@ -111,7 +145,9 @@
 			if(!allows_dye_gradient)
 				return
 			var/list/choice_list = hair_gradient_name_to_type_list()
-			var/chosen_input = input(user, "Choose your dye gradient:", "Character Preference")  as null|anything in choice_list
+			var/chosen_input = href_list["picked_name"]
+			if(!chosen_input || !(chosen_input in choice_list))
+				chosen_input = input(user, "Choose your dye gradient:", "Character Preference")  as null|anything in choice_list
 			if(!chosen_input)
 				return
 			wings_entry.dye_gradient = choice_list[chosen_input]

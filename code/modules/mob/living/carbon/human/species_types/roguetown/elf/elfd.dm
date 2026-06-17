@@ -3,6 +3,8 @@
 
 /datum/species/elf/dark
 	name = "Dark Elf"
+	sub_name = "Dark Elf"
+	is_subrace = TRUE
 	id = "elfd"
 	desc = "<b>Dark Elf</b><br>\
 	\"Elf\" is a catch-all term used for tall, pointy-eared humanoids who can trace their \

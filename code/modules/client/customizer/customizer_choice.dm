@@ -83,6 +83,51 @@
 				var/named_index = (accessory.color_keys == 1) ? accessory.color_key_name : accessory.color_key_names[index]
 				dat += "<br>[named_index]: <a href='?_src_=prefs;task=change_customizer;customizer=[customizer_type];customizer_task=acc_color;color_index=[index]''><span class='color_holder_box' style='background-color:[color_list[index]]'></span></a>"
 
+/// Built once per choice the first time get_pref_data needs the rotate list.
+/datum/customizer_choice/var/list/cached_accessory_names
+
+/// TGUI read side (mirror of generate_pref_choices): returns the picker widgets
+/// (rotate dropdown + reset/color swatches) the React CustomizerCard renders.
+/datum/customizer_choice/proc/get_pref_data(datum/preferences/prefs, datum/customizer_entry/entry)
+	var/list/pickers = list()
+	var/datum/sprite_accessory/accessory
+	if(sprite_accessories && entry.accessory_type)
+		accessory = SPRITE_ACCESSORY(entry.accessory_type)
+	if(!accessory)
+		return pickers
+
+	if(length(sprite_accessories) > 1)
+		if(!cached_accessory_names)
+			cached_accessory_names = list()
+			for(var/choice_type in sprite_accessories)
+				var/datum/sprite_accessory/style = SPRITE_ACCESSORY(choice_type)
+				if(style?.name)
+					cached_accessory_names += style.name
+		pickers += list(list(
+			"type" = "rotate",
+			"text" = accessory.name,
+			"task" = "choose_acc",
+			"options" = cached_accessory_names,
+		))
+
+	if(allows_accessory_color_customization && !(accessory.color_disabled))
+		pickers += list(list(
+			"type" = "reset_colors",
+			"text" = "Reset colors",
+			"task" = "reset_colors",
+		))
+		var/list/color_list = color_string_to_list(entry.accessory_colors)
+		for(var/index in 1 to accessory.color_keys)
+			var/label = (accessory.color_keys == 1) ? accessory.color_key_name : accessory.color_key_names[index]
+			pickers += list(list(
+				"type" = "color",
+				"label" = label,
+				"color" = color_list[index],
+				"task" = "acc_color",
+				"extra" = list("color_index" = "[index]"),
+			))
+	return pickers
+
 /datum/customizer_choice/proc/handle_topic(mob/user, list/href_list, datum/preferences/prefs, datum/customizer_entry/entry, customizer_type)
 	switch(href_list["customizer_task"])
 		if("choose_acc")
@@ -92,7 +137,11 @@
 			for(var/choice_type in sprite_accessories)
 				var/datum/sprite_accessory/accessory = SPRITE_ACCESSORY(choice_type)
 				choice_list[accessory.name] = choice_type
-			var/chosen_input = tgui_input_list(user, "Choose your [LOWER_TEXT(name)] appearance:", "Character Preference",choice_list)
+			// TGUI inline Dropdown ships the chosen name via href_list["picked_name"];
+			// use it directly and skip the popup when present.
+			var/chosen_input = href_list["picked_name"]
+			if(!chosen_input || !(chosen_input in choice_list))
+				chosen_input = tgui_input_list(user, "Choose your [LOWER_TEXT(name)] appearance:", "Character Preference",choice_list)
 			if(!chosen_input)
 				return
 			var/choice_type = choice_list[chosen_input]

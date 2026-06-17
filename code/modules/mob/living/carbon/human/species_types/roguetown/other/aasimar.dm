@@ -4,6 +4,7 @@
 /datum/species/aasimar
 	name = "Aasimar"
 	id = "aasimar"
+	psydonic = TRUE	// celestial-blooded; my call — flip to FALSE if you want them inhumen
 	desc = "<b>Aasimar</b><br>\
 	Aasimar are born of a rare union between Humens and Angels. \
 	They bear the mark of their celestial touch through their many varying physical features. \

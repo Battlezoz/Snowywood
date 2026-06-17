@@ -3,6 +3,9 @@
 
 /datum/species/human/halfelf
 	name = "Half-Elf"
+	base_name = "Humen"
+	sub_name = "Half-Elf"
+	is_subrace = TRUE
 	id = "helf"
 	desc = "<b>Half Elf</b><br>\
 	The child of an Elf and Humen, Half-Elves are generally frowned \

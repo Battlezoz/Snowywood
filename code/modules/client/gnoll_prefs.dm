@@ -13,6 +13,12 @@
 	var/descriptor_voice      = /datum/mob_descriptor/voice/growly
 	var/descriptor_muzzle     = /datum/mob_descriptor/face/gnoll/long_muzzle
 	var/descriptor_expression = /datum/mob_descriptor/face_exp/gnoll/alert
+	// Flavor/OOC superset (Emerald-Summit port; persisted in preferences_savefile.dm).
+	// *_display hold the sanitized render (html_encode + parsemarkdown_basic), set on edit.
+	var/gnoll_flavortext
+	var/gnoll_flavortext_display
+	var/gnoll_ooc_notes
+	var/gnoll_ooc_notes_display
 
 /datum/gnoll_prefs/New()
 	. = ..()
@@ -267,7 +273,7 @@
 	popup.set_content(dat.Join())
 	popup.open()
 
-/datum/gnoll_prefs/proc/gnoll_process_link(mob/user, list/href_list)
+/datum/gnoll_prefs/proc/gnoll_process_link(mob/user, list/href_list, from_tgui = FALSE)
 	if(!user || !user.client)
 		return
 
@@ -278,40 +284,57 @@
 			if(new_name)
 				gnoll_name = sanitize_name(new_name)
 				ensure_gnoll_name()
-				gnoll_show_ui(user)
+				if(!from_tgui)
+					gnoll_show_ui(user)
 
 		if("random_name")
 			gnoll_name = generate_random_gnoll_name()
-			gnoll_show_ui(user)
+			if(!from_tgui)
+				gnoll_show_ui(user)
 
 		if("choose_pronouns")
 			var/list/pronoun_options = get_pronoun_options()
-			var/current_pronoun = get_selected_label(pronoun_options, gnoll_pronouns)
-			var/selected_pronoun = input(user, "Choose pronouns", "Gnoll Customization", current_pronoun) as null|anything in pronoun_options
-			if(!selected_pronoun)
+			// TGUI Dropdown sends its pick via picked_name; classic path prompts.
+			var/selected_pronoun
+			if(from_tgui)
+				selected_pronoun = href_list["picked_name"]
+			else
+				var/current_pronoun = get_selected_label(pronoun_options, gnoll_pronouns)
+				selected_pronoun = input(user, "Choose pronouns", "Gnoll Customization", current_pronoun) as null|anything in pronoun_options
+			if(!selected_pronoun || isnull(pronoun_options[selected_pronoun]))
 				return
 			gnoll_pronouns = pronoun_options[selected_pronoun]
-			gnoll_show_ui(user)
+			if(!from_tgui)
+				gnoll_show_ui(user)
 
 		if("choose_pelt")
 			var/list/pelt_options = get_pelt_options()
-			var/current_pelt = get_selected_label(pelt_options, pelt_type)
-			var/selected_pelt = input(user, "Choose pelt pattern", "Gnoll Customization", current_pelt) as null|anything in pelt_options
-			if(!selected_pelt)
+			var/selected_pelt
+			if(from_tgui)
+				selected_pelt = href_list["picked_name"]
+			else
+				var/current_pelt = get_selected_label(pelt_options, pelt_type)
+				selected_pelt = input(user, "Choose pelt pattern", "Gnoll Customization", current_pelt) as null|anything in pelt_options
+			if(!selected_pelt || isnull(pelt_options[selected_pelt]))
 				return
 			pelt_type = pelt_options[selected_pelt]
-			gnoll_show_ui(user)
+			if(!from_tgui)
+				gnoll_show_ui(user)
 
 		if("choose_descriptor")
 			var/slot = href_list["slot"]
 			var/list/descriptor_options = get_descriptor_options(slot)
 			if(!descriptor_options)
 				return
-			var/current_descriptor = get_selected_label(descriptor_options, get_descriptor_value(slot))
-			var/selected_descriptor = input(user, "Describe my [slot]", "Gnoll Customization", current_descriptor) as null|anything in descriptor_options
-			if(!selected_descriptor)
+			var/selected_descriptor
+			if(from_tgui)
+				selected_descriptor = href_list["picked_name"]
+			else
+				var/current_descriptor = get_selected_label(descriptor_options, get_descriptor_value(slot))
+				selected_descriptor = input(user, "Describe my [slot]", "Gnoll Customization", current_descriptor) as null|anything in descriptor_options
+			if(!selected_descriptor || isnull(descriptor_options[selected_descriptor]))
 				return
-			if(set_descriptor_value(slot, descriptor_options[selected_descriptor]))
+			if(set_descriptor_value(slot, descriptor_options[selected_descriptor]) && !from_tgui)
 				gnoll_show_ui(user)
 
 		if("set_pronouns")
@@ -332,7 +355,8 @@
 			var/toggle = href_list["toggle"]
 			if(genital in genitals)
 				genitals[genital] = (toggle == "enable")
-				gnoll_show_ui(user)
+				if(!from_tgui)
+					gnoll_show_ui(user)
 
 		if("set_descriptor")
 			var/slot = href_list["slot"]

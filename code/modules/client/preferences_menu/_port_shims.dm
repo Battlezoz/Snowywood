@@ -38,13 +38,10 @@
 
 /obj/item/bodypart/lamian_tail/lamian_tail
 
-// --- /datum/species subspecies fields ES's IdentityTab reads ------------------
-// Real values get backported onto each species in Phase 3 (subspecies grouping).
-/datum/species
-	var/base_name
-	var/sub_name
-	var/is_subrace = FALSE
-	var/psydonic = FALSE
+// --- /datum/species: base_name/sub_name/is_subrace/psydonic graduated to
+// species.dm (Phase 3 backport + psydonic wiring 2026-06-17). Real schema now
+// lives on /datum/species; the multi-member families + psydonic lineages set
+// theirs explicitly. ---
 
 /datum/species/proc/get_tail_list()
 	return list()
@@ -57,38 +54,32 @@
 	var/datum/virtue/virtue_origin = new /datum/virtue/none
 	var/stat_simple = FALSE
 	var/is_legacy = FALSE
-	var/nsfw_headshot_link
-	var/nsfw_ooc_extra
-	var/nsfw_ooc_extra_link
+	// OOC reconciliation (Phase 2): the menu now writes SW's real persisted +
+	// examined fields directly — gossip->noble_gossip, nsfw_ooc_extra(_link)->
+	// nsfw_ooc_extra_img(_link) (see preferences_menu.dm). The *_display vars
+	// below are dead writes: SW recomputes display on-the-fly at examine
+	// (html_encode + parsemarkdown_basic), so these just absorb the menu's
+	// edit-time computation harmlessly.
 	var/nsfwflavortext_display
 	var/erpprefs_display
-	var/ooc_extra_link
 	var/ooc_notes_display
-	var/song_url
 	var/rumour_display
-	var/gossip
-	var/gossip_display
+	var/noble_gossip_display
+	// DEFERRED — genuine model conflicts, need a design decision (not stubs to
+	// keep long-term): SW uses `ooc_extra` as a sound URL in examine_tgui (ES
+	// writes rendered media HTML there); SW's song model is artist+title, not a
+	// song_url; SW has no separate NSFW headshot. Left as inert holders for now.
+	var/nsfw_headshot_link
+	var/ooc_extra_link
+	var/song_url
 	var/tail_type
 	var/tail_color = "#ffffff"
 	var/tail_markings_color = "#ffffff"
-
-// --- Gnoll superset fields ES adds (Phase: gnoll adoption + savefile keys) ----
-/datum/gnoll_prefs
-	var/gnoll_flavortext
-	var/gnoll_flavortext_display
-	var/gnoll_ooc_notes
-	var/gnoll_ooc_notes_display
 
 // --- Stub NSFW headshot URL validator (Phase: OOC prefs) ---------------------
 // ES's real validator lives in preferences.dm; ported permissively for now.
 /proc/valid_nsfw_headshot_link(mob/user, value, silent = FALSE)
 	return TRUE
-
-// --- Customizer TGUI serialization (Phase 3: customizer port) ----------------
-// ES adds get_pref_data() to feed the React CustomizerCard. Empty for now →
-// customizer options simply don't populate until the real proc is ported.
-/datum/customizer_choice/proc/get_pref_data(prefs, entry)
-	return list()
 
 // --- Size virtue scale (Phase 4: virtue/origin bridge) -----------------------
 // ES's body-size sync reads /datum/virtue/size.scale; SW's size virtue lacks it.
@@ -99,6 +90,5 @@
 /client/proc/deadchat()
 	return
 
-// --- Job class-explain HTML (Phase 4: re-target to class_setup_examine) -------
-/datum/job/proc/build_class_explain_html()
-	return ""
+// (build_class_explain_html graduated to code/modules/jobs/job_types/_job.dm —
+//  ported from Emerald-Summit; SW has the advclass/subclass schema it needs.)
