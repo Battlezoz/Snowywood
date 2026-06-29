@@ -284,3 +284,19 @@
       verb in the "OOC" panel. It will be saved as a file on your computer.
   RadiantFlash7:
   - code_imp: Admin debug message removed
+2026-06-25:
+  567Turtle:
+  - bugfix: Fixes stripes/tiger stripes markings for real this time.
+  Jamdrawers:
+  - bugfix: fixes keycontrol for the tavern key vendor
+2026-06-26:
+  Xander3359:
+  - rscadd: Refugees can pick minstrel
+2026-06-27:
+  The-Sun-In-Splendour:
+  - spellcheck: ancient alloy warhammer -> ancient warhammer
+2026-06-28:
+  567Turtle:
+  - bugfix: Stripes. . . For the third time !
+  The-Sun-In-Splendour:
+  - bugfix: lacrima's "is dead" check

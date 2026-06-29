@@ -1,0 +1,5 @@
+author: "Xaytan"
+delete-after: True
+changes:
+  - refactor: "refactored heart on_life"
+  - code_imp: "added early exit to sleep stamina healing."
